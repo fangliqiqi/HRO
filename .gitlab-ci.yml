@@ -1,0 +1,24 @@
+sonar_analyze:
+  stage: test
+  script:  
+  - sh ./sonar/sonar_analyze.sh
+  only:
+  - master
+  tags:
+  - front
+sonar_preview:
+  stage: test
+  script:
+  - sh ./sonar/sonar_preview.sh
+  except:
+  - master
+  tags:
+  - front
+auto_test:
+  stage: test
+  script:
+  - sh ./sonar/auto_test.sh
+  except:
+  - master
+  tags:
+  - front

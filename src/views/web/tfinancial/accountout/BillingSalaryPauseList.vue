@@ -1,0 +1,443 @@
+<template>
+  <a-card :bordered="false">
+
+    <!-- 查询区域 -->
+    <div class="table-page-search-wrapper">
+      <a-form layout="inline">
+        <a-row :gutter="24">
+          <a-col
+            :md="6"
+            :sm="8"
+          >
+            <a-form-item label="员工姓名">
+              <a-input
+                placeholder="请输入员工姓名"
+                v-model="queryParam.name"
+              ></a-input>
+            </a-form-item>
+          </a-col>
+          <a-col
+            :md="6"
+            :sm="8"
+          >
+            <a-form-item label="身份证号">
+              <a-input
+                placeholder="请输入身份证号"
+                v-model="queryParam.idCard"
+              ></a-input>
+            </a-form-item>
+          </a-col>
+          <a-col
+            :md="6"
+            :sm="8"
+          >
+            <a-form-item label="结算主体">
+              <!-- <a-select
+                v-model="queryParam.settleDepartName"
+                showSearch
+                placeholder="选择结算主体"
+                optionFilterProp="children"
+                @focus="handleFocus"
+                allowClear
+              >
+                <a-select-option
+                  v-for="(item, index) in settlementList"
+                  :key="index"
+                  :value="item.departName"
+                >{{ item.departName }}</a-select-option>
+              </a-select> -->
+              <a-input
+                v-model="queryParam.settleDepartName"
+                placeholder="请输入结算主体"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col
+            :md="6"
+            :sm="8"
+          >
+            <a-form-item label="结算主体编码">
+              <a-input
+                placeholder="请输入结算主体编码"
+                v-model="queryParam.settleDepartNo"
+              />
+            </a-form-item>
+          </a-col>
+          <template v-if="toggleSearchStatus">
+            <a-col
+              :md="6"
+              :sm="8"
+            >
+              <a-form-item label="结算月份">
+                <a-month-picker
+                  v-model="queryParam.settleDate"
+                  style="width: 100%"
+                  placeholder="请选择月份"
+                  format="YYYYMM"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col
+              :md="6"
+              :sm="8"
+            >
+              <a-form-item label="上传人">
+                <select-page
+                  :searchUrl="'admin/user/page/wxhr?nickname='"
+                  :title="'nickname'"
+                  placeholder="请选择上传人"
+                  :id="'userId'"
+                  v-model="queryParam.chargeUser"
+                  style="width:100%"
+                ></select-page>
+              </a-form-item>
+            </a-col>
+          </template>
+          <a-col
+            :md="6"
+            :sm="8"
+          >
+            <span
+              style="float: left;overflow: hidden;"
+              class="table-page-search-submitButtons"
+            >
+              <a-button
+                type="primary"
+                @click="searchQuery"
+                icon="search"
+              >查询</a-button>
+              <a-button
+                type="primary"
+                @click="searchReset"
+                icon="reload"
+                style="margin-left: 8px"
+              >重置</a-button>
+              <a-button
+                type="primary"
+                @click="handleBatchBill"
+                style="margin-left: 8px"
+                v-have="'wxhr:tchargerecord_doBatchIssuePause'"
+              >批量出账</a-button>
+              <a
+                @click="handleToggleSearch"
+                style="margin-left: 8px"
+              >
+                {{ toggleSearchStatus ? '收起' : '展开' }}
+                <a-icon :type="toggleSearchStatus ? 'up' : 'down'" />
+              </a>
+            </span>
+          </a-col>
+        </a-row>
+      </a-form>
+    </div>
+
+    <!-- table区域-begin -->
+    <div>
+      <div
+        class="ant-alert ant-alert-info"
+        style="margin-bottom: 16px;"
+      >
+        已选择 <a style="font-weight: 600">{{ selectedRowKeys.length }}</a> 项
+        <a
+          style="margin-left: 24px"
+          @click="onClearSelected"
+        >清空</a>
+      </div>
+      <a-table
+        ref="table"
+        size="middle"
+        bordered
+        rowKey="id"
+        :scroll="{x: 1}"
+        :columns="columns"
+        :dataSource="dataSource"
+        :pagination="ipagination"
+        :loading="loading"
+        @change="handleTableChange"
+      >
+        <span
+          slot="action"
+          slot-scope="text, record"
+        >
+          <a
+            @click="handleBilling(record)"
+            v-has="'wxhr:tchargerecord_doIssuePause'"
+          >出账</a>
+        </span>
+
+        <!-- 状态 -->
+        <span
+          slot="chargeStatus"
+          slot-scope="text, record"
+        >
+          <template v-for="(status, key) in statusOptions">
+            <a-tag
+              :key="key"
+              v-if="record.chargeStatus == key"
+              :color="status.color"
+            >{{ status.option }}</a-tag>
+          </template>
+        </span>
+      </a-table>
+    </div>
+    <!-- table区域-end -->
+
+    <!-- 表单区域 -->
+    <billing-salary-pause-modal
+      ref="billingSalaryPauseModal"
+      :bankOptions="bankOptions"
+      @ok="modalFormOk"
+    ></billing-salary-pause-modal>
+    <billing-salary-batch-modal
+      ref="billingsalarybatchmodal"
+      @ok="modalBatchOk"
+    ></billing-salary-batch-modal>
+  </a-card>
+</template>
+
+<script>
+  import { JeecgListMixin } from '@/mixins/JeecgListMixin'
+  import BillingSalaryPauseModal from './modules/BillingSalaryPauseModal' 
+  import BillingSalaryBatchModal from './modules/BillingSalaryBatchModal' 
+  import { initDictOptions, filterDictText } from '@/components/dict/JDictSelectUtil'
+  import { getSettlementAuthorityByUser } from '@/api/api'
+  import { httpAction } from '@/api/manage'
+  import SelectPage from '@/components/jeecg/SelectPage'
+
+  export default {
+    name: 'BillingSalaryPauseList',
+    mixins: [JeecgListMixin],
+    components: {
+      BillingSalaryPauseModal,
+      BillingSalaryBatchModal,
+      SelectPage
+    },
+    data() {
+      return {
+        description: '普通薪资暂停发出账',
+        // excel表头数据
+        exportFields: [],
+        bankOptions:[],
+        settlementList:[],
+        statusOptions:{
+          '0':{'option': '待发放', 'color': 'green'},
+          '1':{'option': '已发放', 'color': 'red'},
+          '2':{'option': '发放失败', 'color': 'blue'},
+        },
+        // 表头
+        columns: [
+          {
+            width: 140,
+            ellipsis: true,
+            title: '发放状态',
+            align: 'center',
+            dataIndex: 'chargeStatus',
+            scopedSlots: { customRender: 'chargeStatus' },
+          },
+          {
+            width: 150,
+            ellipsis: true,
+            title: '员工姓名',
+            align: 'center',
+            dataIndex: 'name',
+            customRender: text => {
+              const resultText = text || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            }
+          },
+          {
+            width: 180,
+            ellipsis: true,
+            title: '身份证号',
+            align: 'center',
+            dataIndex: 'idCard',
+            customRender: text => {
+              const resultText = text || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            }
+          },
+          {
+            width: 180,
+            ellipsis: true,
+            title: '结算主体',
+            align: 'center',
+            dataIndex: 'settleDepartName',
+            customRender: text => {
+              const resultText = text || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            }
+          },
+          {
+            width: 140,
+            ellipsis: true,
+            title: '发放金额',
+            align: 'center',
+            dataIndex: 'chargeMoney',
+            customRender: text => {
+              const resultText = text || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            }
+          },
+          {
+            width: 140,
+            ellipsis: true,
+            title: '发放方式',
+            align: 'center',
+            dataIndex: 'chargeType',
+            customRender: (text) => {
+              const options = {'0':'现金','1':'银付','2':'线下'}
+              const resultText = options[String(text)] || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            },
+          },
+          {
+            width: 180,
+            ellipsis: true,
+            title: '收款卡号',
+            align: 'center',
+            dataIndex: 'bankNo',
+            customRender: text => {
+              const resultText = text || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            }
+          },
+          {
+            width: 140,
+            ellipsis: true,
+            title: '上传人',
+            align:'center',
+            dataIndex: 'chargeUser',
+            customRender:(text) => {
+              for(const c in this.employData){
+                if(String(c) === String(text)){
+                  return this.employData[c]
+                }
+              }
+              return '-'
+            }
+          },
+          {
+            width: 160,
+            ellipsis: true,
+            title: '收款银行',
+            align: 'center',
+            dataIndex: 'bankName',
+            customRender: (text) => {
+              const bankName = filterDictText(this.bankOptions, text)
+              if(String(bankName) === '-' && text){
+                return <a-tooltip title={text}>{text}</a-tooltip>
+              }
+              return <a-tooltip title={bankName}>{bankName}</a-tooltip>
+            },
+          },
+          {
+            width: 140,
+            ellipsis: true,
+            title: '结算月份',
+            align: 'center',
+            dataIndex: 'settleDate',
+            customRender: text => {
+              const resultText = text || '-'
+              return <a-tooltip title={resultText}>{resultText}</a-tooltip>
+            }
+          },
+          {
+            width: 120,
+            title: '操作',
+            key: 'operation',
+            align: 'center',
+            fixed: 'right',
+            scopedSlots: { customRender: 'action' },
+          },
+        ],
+        url: {
+          list: 'salary/tchargerecord/getPendingSalaryPausePage',
+        },
+        employData:{},
+      }
+    },
+    created() {
+      this.loadSettlementList()
+      httpAction('/admin/user/userDic','','GET').then((res) => {
+        if(res.code == 200){
+          this.employData = res.data
+        }
+      })
+    },
+    methods: {
+      // 添加
+      handleBilling: function(record) {
+        this.$refs.billingSalaryPauseModal.show(record)
+      },
+      //批量出账
+      handleBatchBill(){
+        if(!this.queryParam.settleDepartNo){
+          this.$message.error("请输入结算编码")
+          return false
+        }
+        if(!this.queryParam.settleDate){
+          this.$message.error("请选择结算月份")
+          return false
+        }
+        this.$refs.billingsalarybatchmodal.show(this.queryParam.settleDepartNo,this.queryParam.settleDate)
+        this.$refs.billingsalarybatchmodal.employData = this.employData
+      },
+      modalBatchOk(){
+        this.loadData()
+      },
+      // 数据字典
+      initDictConfig() {
+        // 开户行
+        initDictOptions('bank').then((res) => {
+          if (res.code === 200) {
+            this.bankOptions = res.data
+          }
+        })
+      },
+      // 获取结算主体列表
+      loadSettlementList() {
+        getSettlementAuthorityByUser({}).then((res) => {
+          console.log(res)
+          this.settlementList = res.data
+        })
+      },
+    }
+  }
+</script>
+<style lang="less" scoped>
+/** Button按钮间距 */
+.ant-btn {
+  margin-left: 3px;
+}
+
+.ant-card-body .table-operator {
+  margin-bottom: 18px;
+}
+
+.ant-table-tbody .ant-table-row td {
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+
+.anty-row-operator button {
+  margin: 0 5px;
+}
+
+.ant-btn-danger {
+  background-color: #ffffff;
+}
+
+.ant-modal-cust-warp {
+  height: 100%;
+}
+
+.ant-modal-cust-warp .ant-modal-body {
+  height: calc(100% - 110px) !important;
+  overflow-y: auto;
+}
+
+.ant-modal-cust-warp .ant-modal-content {
+  height: 90% !important;
+  overflow-y: hidden;
+}
+</style>
